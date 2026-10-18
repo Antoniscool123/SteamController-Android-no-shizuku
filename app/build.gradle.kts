@@ -4,6 +4,7 @@ import java.io.FileInputStream
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
 }
 
 // Load signing config from keystore.properties (gitignored) if present.
@@ -26,8 +27,8 @@ android {
         applicationId = "com.steamcontroller.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "3.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
@@ -48,7 +49,7 @@ android {
     }
 
     buildFeatures {
-        viewBinding = true
+        compose = true
         aidl = true
         buildConfig = true
     }
@@ -70,6 +71,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Install alongside a release build instead of replacing it: the two have
+            // different signatures and the release may carry a higher versionCode, so a
+            // plain debug install fails and uninstalling would take the user's
+            // calibration and mappings with it. Shizuku permission is per-package, so
+            // the debug build asks for its own.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -98,4 +109,8 @@ dependencies {
     implementation(libs.shizuku.api)
     implementation(libs.shizuku.provider)
     implementation(libs.kotlinx.coroutines.android)
+    implementation(platform(libs.androidx.compose.bom))
+    implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.icons.core)
+    implementation(libs.androidx.activity.compose)
 }

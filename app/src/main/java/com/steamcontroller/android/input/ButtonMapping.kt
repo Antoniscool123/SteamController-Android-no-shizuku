@@ -34,7 +34,9 @@ enum class SteamButton(
     // Trigger full-press = digital bit fired when the analog trigger reaches max travel.
     // The analog 0..32767 value still routes automatically to LT/RT axes on the
     // emulated gamepad — these entries only matter if you remap "fully pulled" to a
-    // different action (e.g. RT-full → A button). LT_FULL bit at 0x400000 is V1.2-empirical.
+    // different action (e.g. RT-full → A button). LT_FULL is byte 5 bit 3, confirmed on
+    // hardware 2026-09-20 (LT at full travel sets it; the upstream header still lists
+    // that bit as TBD). It is NOT 0x400000 — that bit is the right trackpad's click.
     LT     (Buttons.LT_FULL, "L2 / LT (full press)", ButtonCategory.TRIGGERS),
     RT     (Buttons.RT_FULL, "R2 / RT (full press)", ButtonCategory.TRIGGERS),
     LS     (Buttons.LS,      "L3 (stick click)",   ButtonCategory.STICKS),
@@ -101,21 +103,21 @@ enum class XboxTarget(val mask: Int, val displayName: String, val keyBit: Int = 
 
     // ── Sidecar keyboard keys (great for back paddles in gamepad mode) ───────
     // keyBit values must match MouseTarget.bit positions (see MouseTarget.kt).
-    KB_VOLUME_UP  (-10, "🔊 Volume +",       keyBit = 10),
-    KB_VOLUME_DOWN(-11, "🔉 Volume -",       keyBit = 11),
-    KB_PLAY_PAUSE (-12, "⏯ Play / Pause",     keyBit = 12),
-    KB_BACK       (-13, "⮌ Back",             keyBit = 5),
-    KB_HOME       (-14, "🏠 Home",            keyBit = 8),
-    KB_ENTER      (-15, "↵ Enter",            keyBit = 4),
-    KB_DPAD_CENTER(-16, "● DPAD Center",      keyBit = 15),
+    KB_VOLUME_UP  (-10, "Volume +",       keyBit = 10),
+    KB_VOLUME_DOWN(-11, "Volume -",       keyBit = 11),
+    KB_PLAY_PAUSE (-12, "Play / Pause",     keyBit = 12),
+    KB_BACK       (-13, "Back",             keyBit = 5),
+    KB_HOME       (-14, "Home",            keyBit = 8),
+    KB_ENTER      (-15, "Enter",            keyBit = 4),
+    KB_DPAD_CENTER(-16, "DPAD Center",      keyBit = 15),
     KB_ESCAPE     (-17, "ESC",                keyBit = 9),
-    KB_TAB        (-18, "⇥ Tab",              keyBit = 6),
-    KB_SPACE      (-19, "␣ Space",            keyBit = 7),
-    KB_BACKSPACE  (-20, "⌫ Backspace",        keyBit = 14),
-    KB_MENU       (-21, "☰ Menu (context)",   keyBit = 13),
+    KB_TAB        (-18, "Tab",              keyBit = 6),
+    KB_SPACE      (-19, "Space",            keyBit = 7),
+    KB_BACKSPACE  (-20, "Backspace",        keyBit = 14),
+    KB_MENU       (-21, "Menu (context)",   keyBit = 13),
 
     // Special actions (mask < 0, no keyBit). Edge-triggered on press in Kotlin.
-    SCREENSHOT(-1, "📸 Take screenshot"),
+    SCREENSHOT(-1, "Take screenshot"),
 }
 
 /** Default mapping — reproduces the hardcoded mapping that existed before this feature. */

@@ -1,5 +1,7 @@
 package com.steamcontroller.android.uinput
 
+import com.steamcontroller.android.ipc.IUInputService
+
 import android.content.ComponentName
 import android.content.Context
 import android.content.ServiceConnection
@@ -78,7 +80,9 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
         .daemon(false)
         .processNameSuffix("uinput")
         .debuggable(false)
-        .version(1)
+        // Bumped with every IUInputService change: Shizuku reuses a running service of the
+        // same version, and an old one would not know the newer methods.
+        .version(2)
 
     @Volatile private var deviceReady = false
 
@@ -127,14 +131,13 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
         service = null
     }
 
-    // Android's InputManager treats a paired/connected HID keyboard-classified device as a
-    // hardware keyboard and suppresses the on-screen keyboard for every text field, system-wide,
-    // for as long as it's attached. The Steam Controller's own USB/BT HID interfaces can trigger
-    // this classification independently of our uinput device (e.g. a legacy "boot keyboard" HID
-    // interface used for lizard mode, auto-bound by the kernel/Bluetooth stack outside our app's
-    // control). Forcing Settings.Secure.show_ime_with_hard_keyboard=1 via the shell UID makes
-    // Android show the soft keyboard regardless. Reverted on unbind() so a real Bluetooth
-    // keyboard paired later behaves normally.
+    // Android's InputManager treats a connected HID keyboard-classified device as a
+    // hardware keyboard and suppresses the on-screen keyboard for every text field,
+    // system-wide, for as long as it's attached. The Steam Controller's own USB/BT HID
+    // interfaces can trigger this classification independently of our uinput device.
+    // Forcing Settings.Secure.show_ime_with_hard_keyboard=1 via the shell UID makes Android
+    // show the soft keyboard regardless. Reverted on unbind() so a real Bluetooth keyboard
+    // paired later behaves normally.
     private fun applyShowImeOverride(svc: IUInputService) {
         try {
             if (Prefs.getSavedShowImeHardKeyboard(context) == null) {

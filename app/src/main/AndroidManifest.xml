@@ -17,6 +17,9 @@
     <!-- Update checker: fetch latest GitHub release + download/install the signed APK. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Auto-launch: lets Settings ask to lift battery optimisation, which is what
+         allows starting the foreground service from the background on Android 12+. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Android 12+ runtime permissions -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -49,7 +52,7 @@
         android:allowBackup="true"
         android:banner="@drawable/tv_banner"
         android:icon="@mipmap/ic_launcher"
-        android:label="Steam Controller"
+        android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.SteamController">
@@ -72,35 +75,20 @@
                 android:resource="@xml/device_filter" />
         </activity>
 
-        <activity
-            android:name=".DebugActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity" />
-
-        <activity
-            android:name=".CalibrationActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity" />
-
-        <activity
-            android:name=".MappingActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity" />
-
-        <activity
-            android:name=".ProfilesActivity"
-            android:exported="false"
-            android:parentActivityName=".MainActivity" />
-
-        <activity
-            android:name=".AppPickerActivity"
-            android:exported="false"
-            android:parentActivityName=".ProfilesActivity" />
-
         <service
             android:name=".service.ControllerService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Auto-launch on Bluetooth connection. ACL_CONNECTED is one of the implicit
+             broadcasts still delivered to manifest receivers. -->
+        <receiver
+            android:name=".service.AutoLaunchReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
+            </intent-filter>
+        </receiver>
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"

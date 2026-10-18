@@ -1,7 +1,11 @@
 package com.steamcontroller.android.service
 
 import android.app.*
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import android.content.pm.ServiceInfo
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
@@ -16,9 +20,11 @@ import com.steamcontroller.android.Transport
 import com.steamcontroller.android.bt.BluetoothHidManager
 import com.steamcontroller.android.input.GamepadMapper
 import com.steamcontroller.android.input.ShizukuInputInjector
+import com.steamcontroller.android.parser.BatteryStatus
 import com.steamcontroller.android.parser.Buttons
 import com.steamcontroller.android.parser.SteamControllerState
 import com.steamcontroller.android.parser.SteamReportParser
+import com.steamcontroller.android.protocol.SteamCommands
 import com.steamcontroller.android.uinput.UInputGamepad
 import com.steamcontroller.android.usb.HidReportReader
 import com.steamcontroller.android.usb.SteamHidProtocol
@@ -36,6 +42,7 @@ class ControllerService : Service() {
     companion object {
         private const val TAG = "ControllerService"
         const val NOTIFICATION_ID = 1
+        private const val NOTIFICATION_ID_SHIZUKU = 2
         const val CHANNEL_ID = "steam_controller"
         const val EXTRA_DEVICE = "usb_device"
         const val ACTION_STOP = "com.steamcontroller.android.STOP"
@@ -57,9 +64,10 @@ class ControllerService : Service() {
         private val _profileFlow = MutableStateFlow<Int?>(null)
         val profileFlow: StateFlow<Int?> = _profileFlow.asStateFlow()
 
-        // Controller battery as 0..100, or null if unknown. Updated when a HID report carries it.
-        private val _batteryFlow = MutableStateFlow<Int?>(null)
-        val batteryFlow: StateFlow<Int?> = _batteryFlow.asStateFlow()
+        // Controller battery, or null if unknown. Carries the charge state as well as the
+        // percent, so the UI can say "charging" instead of a level that is not moving.
+        private val _batteryFlow = MutableStateFlow<BatteryStatus?>(null)
+        val batteryFlow: StateFlow<BatteryStatus?> = _batteryFlow.asStateFlow()
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -70,6 +78,19 @@ class ControllerService : Service() {
     private var mode: InjectionMode = InjectionMode.NONE
     private var reader: HidReportReader? = null
     private var heartbeatJob: Job? = null
+    private var initialized = false
+
+    // The service, not MainActivity, has to notice the unplug: with auto-launch the
+    // activity is long gone by then.
+    private val usbDetachReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            val dev: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            if (dev != null && dev == usbManager.device) {
+                Log.i(TAG, "Controller unplugged, stopping")
+                stopSelf()
+            }
+        }
+    }
 
     // Bits whose changes must pass through the debounce mechanism before being injected.
     // Mechanical switches only — the SC2026's grip squeeze sensors (GRIP_LT/RT), trackpad
@@ -100,6 +121,8 @@ class ControllerService : Service() {
         uinput = UInputGamepad(this, Prefs.getProfile(this))
         uinput.onRumble = { strong, weak -> forwardRumble(strong, weak) }
         createNotificationChannel()
+        ContextCompat.registerReceiver(this, usbDetachReceiver,
+            IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED), ContextCompat.RECEIVER_NOT_EXPORTED)
         _profileFlow.value = Prefs.getProfile(this).id
 
         // Refresh the foreground notification whenever the controller's battery level changes.
@@ -259,10 +282,12 @@ class ControllerService : Service() {
         when (Prefs.getTransport(this)) {
             Transport.BLUETOOTH -> btManager.sendRumble(scaledStrong, scaledWeak)
             Transport.USB       -> {
-                // USB rumble = feature report via controlTransfer. Not implemented yet —
-                // requires identifying the exact SC2026 feature report ID (likely 0x8F
-                // per hid-steam.c) and payload format. Same byte structure as BT.
-                Log.v(TAG, "USB rumble not implemented yet")
+                val conn = usbManager.connection
+                if (conn == null) {
+                    Log.v(TAG, "USB rumble skipped: no connection")
+                } else {
+                    SteamHidProtocol.sendRumble(conn, scaledStrong, scaledWeak, usbManager.endpointOut)
+                }
             }
         }
     }
@@ -290,6 +315,12 @@ class ControllerService : Service() {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
 
+        // Auto-launch can fire while we already run (BT reconnect, USB re-attach intent).
+        // startForeground() above must still be honoured, but initialising twice would
+        // open a second transport and a second heartbeat.
+        if (initialized) return START_STICKY
+        initialized = true
+
         val device = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent?.getParcelableExtra(EXTRA_DEVICE, UsbDevice::class.java)
         } else {
@@ -305,6 +336,19 @@ class ControllerService : Service() {
         val transport = Prefs.getTransport(this@ControllerService)
         Log.i(TAG, "Initializing with transport=$transport")
         chooseInjectionMode()
+        if (mode == InjectionMode.NONE) {
+            // Typically Shizuku not restarted after a reboot. Say so in a notification that
+            // outlives the service, rather than leaving a "Connecting…" one that never resolves.
+            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID_SHIZUKU,
+                Notification.Builder(this, CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.stat_notify_error)
+                    .setContentTitle(getString(R.string.notification_title))
+                    .setContentText(getString(R.string.shizuku_not_running))
+                    .setAutoCancel(true)
+                    .build())
+            stopSelf()
+            return
+        }
 
         val ok = when (transport) {
             Transport.USB       -> initUsb(device)
@@ -335,7 +379,7 @@ class ControllerService : Service() {
 
         heartbeatJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
-                delay(800)
+                delay(SteamCommands.KEEPALIVE_INTERVAL_MS)
                 SteamHidProtocol.heartbeat(conn)
             }
         }
@@ -378,12 +422,15 @@ class ControllerService : Service() {
             },
             onConnectionChange = { connected ->
                 Log.i(TAG, "BT connection state: $connected")
+                // Controller switched off or out of range: drop the virtual pad like a real
+                // one being unplugged. AutoLaunchReceiver brings us back on reconnection.
+                if (!connected) stopSelf()
             }
         )
 
         heartbeatJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
-                delay(800)
+                delay(SteamCommands.KEEPALIVE_INTERVAL_MS)
                 btManager.sendHeartbeat()
             }
         }
@@ -391,20 +438,21 @@ class ControllerService : Service() {
     }
 
     private fun onHidFrame(state: SteamControllerState, raw: ByteArray) {
+        if (raw.isEmpty()) return
+        val reportId = raw[0].toInt() and 0xFF
+
+        // The battery arrives in its own report (0x43), not in the state report. Route it
+        // first: a battery report is far too short to be parsed as state.
+        SteamReportParser.parseBatteryStatus(raw)?.let { battery ->
+            if (_batteryFlow.value != battery) _batteryFlow.value = battery
+            return
+        }
+
+        if (!SteamReportParser.isStateReportId(reportId)) return
+
         _stateFlow.value = state
         _rawReportFlow.value = raw
-
-        // Dedicated battery/charge report (id 0x43) — works on both USB and BT,
-        // percent is already 0-100. Sole battery source: bytes 44-45 of the 0x45 state
-        // report were assumed to be a static battery field but turned out to be live,
-        // fast-changing data (empirically: flickers 0%/99% on USB), so that guess isn't used.
-        SteamReportParser.parseBatteryStatus(raw)?.let { status ->
-            if (_batteryFlow.value != status.percent) _batteryFlow.value = status.percent
-        }
-
-        if (raw.isNotEmpty() && (raw[0].toInt() and 0xFF) == 0x45) {
-            handleState(state)
-        }
+        handleState(state)
     }
 
     // Try uinput first (real InputDevice, works in games). Fall back to inject if uinput is denied.
@@ -553,9 +601,18 @@ class ControllerService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterReceiver(usbDetachReceiver)
         try { uinput.unbind() } catch (_: Throwable) {}
         scope.cancel()
         reader?.stop()
+        // Hand the controller back to its firmware keyboard/mouse emulation, otherwise it
+        // stays mute until the firmware's own revert timeout expires.
+        try {
+            usbManager.connection?.let { SteamHidProtocol.enableLizardMode(it) }
+            btManager.restoreLizardMode()
+        } catch (t: Throwable) {
+            Log.w(TAG, "Lizard restore failed: ${t.message}")
+        }
         usbManager.disconnect()
         try { btManager.disconnect() } catch (_: Throwable) {}
         _modeFlow.value = InjectionMode.NONE
@@ -597,7 +654,7 @@ class ControllerService : Service() {
         val activeProfileName = Prefs.getActiveNamedProfileId(this)?.let { id ->
             Prefs.listNamedProfiles(this).firstOrNull { it.id == id }?.name
         }
-        val baseLine = if (battery != null) "$modeText  •  🔋 $battery%" else modeText
+        val baseLine = if (battery != null) "$modeText  •  🔋 ${battery.describe()}" else modeText
         val text = if (activeProfileName != null) "$baseLine\n🎯 $activeProfileName" else baseLine
 
         // Tap on the notification → open MainActivity
@@ -616,7 +673,7 @@ class ControllerService : Service() {
         )
         val stopAction = Notification.Action.Builder(
             android.graphics.drawable.Icon.createWithResource(this, android.R.drawable.ic_media_pause),
-            getString(android.R.string.cancel),
+            "Cancel",
             stopIntent
         ).build()
 

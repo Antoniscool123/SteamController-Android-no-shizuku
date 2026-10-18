@@ -15,12 +15,22 @@ class UsbConnectionManager(private val context: Context) {
     var endpointIn: UsbEndpoint? = null
         private set
 
-    // Interfaces claimed only to keep them away from the kernel — e.g. the Steam
-    // Controller's legacy "boot keyboard" HID interface used for lizard mode. If we
-    // don't claim it, Android's kernel usbhid driver binds it and creates a real,
-    // non-virtual keyboard InputDevice — which makes Android believe a hardware
-    // keyboard is always connected and suppresses the on-screen keyboard everywhere,
-    // for as long as the controller stays plugged in. Released on disconnect().
+    /**
+     * Interrupt OUT endpoint, when the interface exposes one.
+     *
+     * HID *output* reports belong here rather than on the control pipe. SET_REPORT with
+     * report type Output is refused by this controller (controlTransfer returns < 0),
+     * while the same call with report type Feature is accepted — which is why lizard mode
+     * works over control and rumble does not.
+     */
+    var endpointOut: UsbEndpoint? = null
+        private set
+
+    // Interfaces claimed only to keep them away from the kernel. The wired controller has a
+    // single interface, but the Puck exposes several (keyboard, mouse, dock, CDC…): left
+    // alone, usbhid binds them and Android sees a real hardware keyboard, which suppresses
+    // the on-screen keyboard everywhere for as long as the Puck is plugged in.
+    // Released on disconnect().
     private val heldInterfaces = mutableListOf<UsbInterface>()
 
     companion object {
@@ -56,14 +66,16 @@ class UsbConnectionManager(private val context: Context) {
         device = dev
         connection = conn
         endpointIn = ep
+        endpointOut = findOutEndpoint(iface)
         claimRemainingInterfaces(dev, conn, iface)
+        Log.i(TAG, "Interrupt OUT endpoint: " +
+            (endpointOut?.let { "0x${it.address.toString(16)}" } ?: "none"))
         Log.i(TAG, "Connected — PID=0x${dev.productId.toString(16).uppercase()} iface=${iface.id} ep=${ep.address} type=${ep.type}")
         return true
     }
 
-    // Force-claims every other interface on the device so the kernel usbhid driver
-    // can't bind them behind our back (see heldInterfaces comment). We never read
-    // from these — just holding the claim is enough to keep the kernel off them.
+    // Force-claims every other interface so the kernel usbhid driver can't bind them behind
+    // our back (see heldInterfaces). We never read from these — holding the claim is enough.
     private fun claimRemainingInterfaces(dev: UsbDevice, conn: UsbDeviceConnection, dataIface: UsbInterface) {
         for (i in 0 until dev.interfaceCount) {
             val iface = dev.getInterface(i)
@@ -132,10 +144,23 @@ class UsbConnectionManager(private val context: Context) {
             device = null
             connection = null
             endpointIn = null
+            endpointOut = null
         }
     }
 
     val isConnected get() = connection != null
+
+    private fun findOutEndpoint(iface: UsbInterface): UsbEndpoint? {
+        for (i in 0 until iface.endpointCount) {
+            val ep = iface.getEndpoint(i)
+            if (ep.direction == UsbConstants.USB_DIR_OUT &&
+                (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK ||
+                 ep.type == UsbConstants.USB_ENDPOINT_XFER_INT)) {
+                return ep
+            }
+        }
+        return null
+    }
 
     private fun findInEndpoint(iface: UsbInterface): UsbEndpoint? {
         for (i in 0 until iface.endpointCount) {

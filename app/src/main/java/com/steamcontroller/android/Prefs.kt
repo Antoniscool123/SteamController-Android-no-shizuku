@@ -8,6 +8,23 @@ import com.steamcontroller.android.input.StickCalibration
 import com.steamcontroller.android.input.XboxTarget
 import com.steamcontroller.android.uinput.GamepadProfile
 
+/**
+ * Which colour scheme the app runs in.
+ *
+ * STEAM is the built-in palette (Steam blue on Steam navy, light + dark variants in
+ * res/values[-night]/colors.xml). DYNAMIC overlays the wallpaper-derived Material You
+ * palette on top of the same theme — Android 12+ only; below that it silently stays on
+ * STEAM, which is why isAvailable() exists.
+ */
+enum class ThemeMode(val id: Int, val displayName: String) {
+    STEAM(0, "Steam"),
+    DYNAMIC(1, "Dynamic");
+
+    companion object {
+        fun fromId(id: Int) = entries.firstOrNull { it.id == id } ?: STEAM
+    }
+}
+
 enum class Transport(val id: Int, val displayName: String) {
     USB(0, "USB / Puck"),
     BLUETOOTH(1, "Bluetooth");
@@ -38,14 +55,60 @@ object Prefs {
     private const val KEY_TRACKPAD_AS_MOUSE = "trackpad_as_mouse_gamepad"  // sidecar mouse while in Xbox/PS profiles
     private const val KEY_NAMED_PROFILES = "named_profiles_json"
     private const val KEY_ACTIVE_NAMED_PROFILE_ID = "active_named_profile_id"
-
+    private const val KEY_THEME_MODE = "theme_mode"
+    private const val KEY_AUTO_LAUNCH = "auto_launch"
     private const val KEY_LAST_UPDATE_CHECK = "last_update_check_at"
     private const val KEY_SKIPPED_UPDATE_VERSION = "skipped_update_version"
-
     private const val KEY_SAVED_SHOW_IME_HARD_KB = "saved_show_ime_with_hard_keyboard"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+
+    // ─── Update checker ──────────────────────────────────────────────────────
+    fun getLastUpdateCheckAt(context: Context): Long =
+        prefs(context).getLong(KEY_LAST_UPDATE_CHECK, 0L)
+
+    fun setLastUpdateCheckAt(context: Context, timestampMillis: Long) {
+        prefs(context).edit().putLong(KEY_LAST_UPDATE_CHECK, timestampMillis).apply()
+    }
+
+    /** Version the user chose to skip via "Skip this version" — suppresses the auto-check dialog only. */
+    fun getSkippedUpdateVersion(context: Context): String? =
+        prefs(context).getString(KEY_SKIPPED_UPDATE_VERSION, null)
+
+    fun setSkippedUpdateVersion(context: Context, version: String) {
+        prefs(context).edit().putString(KEY_SKIPPED_UPDATE_VERSION, version).apply()
+    }
+
+    // ─── show_ime_with_hard_keyboard override ──────────────────────────────────
+    // Stores the pre-override value of the Settings.Secure key so it can be restored
+    // when the controller disconnects. Written once per override (not overwritten
+    // while an override is already pending), so a crash-without-restore doesn't
+    // clobber the true original on the next connect/disconnect cycle.
+    fun getSavedShowImeHardKeyboard(context: Context): String? =
+        prefs(context).getString(KEY_SAVED_SHOW_IME_HARD_KB, null)
+
+    fun setSavedShowImeHardKeyboard(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_SAVED_SHOW_IME_HARD_KB, value).apply()
+    }
+
+    fun clearSavedShowImeHardKeyboard(context: Context) {
+        prefs(context).edit().remove(KEY_SAVED_SHOW_IME_HARD_KB).apply()
+    }
+
+    fun getAutoLaunch(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_LAUNCH, false)
+
+    fun setAutoLaunch(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_AUTO_LAUNCH, enabled).apply()
+    }
+
+    fun getThemeMode(context: Context): ThemeMode =
+        ThemeMode.fromId(prefs(context).getInt(KEY_THEME_MODE, ThemeMode.STEAM.id))
+
+    fun setThemeMode(context: Context, mode: ThemeMode) {
+        prefs(context).edit().putInt(KEY_THEME_MODE, mode.id).apply()
+    }
 
     fun getProfile(context: Context): GamepadProfile {
         val id = prefs(context).getInt(KEY_PROFILE_ID, GamepadProfile.XBOX_360.id)
@@ -257,37 +320,5 @@ object Prefs {
             setMapping(context, btn, target)
         }
         setActiveNamedProfileId(context, profile.id)
-    }
-
-    // ─── Update checker ──────────────────────────────────────────────────────
-    fun getLastUpdateCheckAt(context: Context): Long =
-        prefs(context).getLong(KEY_LAST_UPDATE_CHECK, 0L)
-
-    fun setLastUpdateCheckAt(context: Context, timestampMillis: Long) {
-        prefs(context).edit().putLong(KEY_LAST_UPDATE_CHECK, timestampMillis).apply()
-    }
-
-    /** Version the user chose to skip via "Skip this version" — suppresses the auto-check dialog only. */
-    fun getSkippedUpdateVersion(context: Context): String? =
-        prefs(context).getString(KEY_SKIPPED_UPDATE_VERSION, null)
-
-    fun setSkippedUpdateVersion(context: Context, version: String) {
-        prefs(context).edit().putString(KEY_SKIPPED_UPDATE_VERSION, version).apply()
-    }
-
-    // ─── show_ime_with_hard_keyboard override ──────────────────────────────────
-    // Stores the pre-override value of the Settings.Secure key so it can be restored
-    // when the controller disconnects. Written once per override (not overwritten
-    // while an override is already pending), so a crash-without-restore doesn't
-    // clobber the true original on the next connect/disconnect cycle.
-    fun getSavedShowImeHardKeyboard(context: Context): String? =
-        prefs(context).getString(KEY_SAVED_SHOW_IME_HARD_KB, null)
-
-    fun setSavedShowImeHardKeyboard(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_SAVED_SHOW_IME_HARD_KB, value).apply()
-    }
-
-    fun clearSavedShowImeHardKeyboard(context: Context) {
-        prefs(context).edit().remove(KEY_SAVED_SHOW_IME_HARD_KB).apply()
     }
 }
