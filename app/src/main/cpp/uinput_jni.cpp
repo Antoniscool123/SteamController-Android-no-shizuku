@@ -1,6 +1,6 @@
 // Virtual Xbox 360 gamepad via Linux uinput.
 // Must run with a UID that has SELinux permission to open /dev/uinput
-// (typically shell via Shizuku, or root). Plain app UID will be denied.
+// (the shell-UID helper the app starts over wireless ADB, or root). Plain app UID will be denied.
 
 #include <jni.h>
 #include <android/log.h>

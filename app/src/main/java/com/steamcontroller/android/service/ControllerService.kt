@@ -18,8 +18,6 @@ import com.steamcontroller.android.Prefs
 import com.steamcontroller.android.R
 import com.steamcontroller.android.Transport
 import com.steamcontroller.android.bt.BluetoothHidManager
-import com.steamcontroller.android.input.GamepadMapper
-import com.steamcontroller.android.input.ShizukuInputInjector
 import com.steamcontroller.android.parser.BatteryStatus
 import com.steamcontroller.android.parser.Buttons
 import com.steamcontroller.android.parser.SteamControllerState
@@ -37,12 +35,12 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class ControllerService : Service() {
 
-    enum class InjectionMode { NONE, UINPUT, SHIZUKU_INJECT }
+    enum class InjectionMode { NONE, UINPUT }
 
     companion object {
         private const val TAG = "ControllerService"
         const val NOTIFICATION_ID = 1
-        private const val NOTIFICATION_ID_SHIZUKU = 2
+        private const val NOTIFICATION_ID_ERROR = 2
         const val CHANNEL_ID = "steam_controller"
         const val EXTRA_DEVICE = "usb_device"
         const val ACTION_STOP = "com.steamcontroller.android.STOP"
@@ -73,7 +71,6 @@ class ControllerService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private lateinit var usbManager: UsbConnectionManager
     private lateinit var btManager: BluetoothHidManager
-    private val legacyInjector = ShizukuInputInjector()
     private lateinit var uinput: UInputGamepad
     private var mode: InjectionMode = InjectionMode.NONE
     private var reader: HidReportReader? = null
@@ -337,13 +334,14 @@ class ControllerService : Service() {
         Log.i(TAG, "Initializing with transport=$transport")
         chooseInjectionMode()
         if (mode == InjectionMode.NONE) {
-            // Typically Shizuku not restarted after a reboot. Say so in a notification that
-            // outlives the service, rather than leaving a "Connecting…" one that never resolves.
-            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID_SHIZUKU,
+            // Typically Wireless debugging was switched off (it resets on reboot / Wi-Fi loss) or
+            // was never paired. Say so in a notification that outlives the service, rather than
+            // leaving a "Connecting…" one that never resolves.
+            getSystemService(NotificationManager::class.java)?.notify(NOTIFICATION_ID_ERROR,
                 Notification.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_notify_error)
                     .setContentTitle(getString(R.string.notification_title))
-                    .setContentText(getString(R.string.shizuku_not_running))
+                    .setContentText(getString(R.string.adb_not_ready))
                     .setAutoCancel(true)
                     .build())
             stopSelf()
@@ -455,13 +453,14 @@ class ControllerService : Service() {
         handleState(state)
     }
 
-    // Try uinput first (real InputDevice, works in games). Fall back to inject if uinput is denied.
+    // uinput through the shell-UID helper that the app launches over its own ADB connection.
+    // Games see a real InputDevice, unlike injected events.
     private suspend fun chooseInjectionMode() {
-        // 1. Try uinput via Shizuku UserService
         try {
             uinput.bind()
-            for (attempt in 0 until 20) {
-                if (uinput.isReady) break
+            // The first launch goes through ADB (connect + app_process start): allow ~20 s.
+            for (attempt in 0 until 130) {
+                if (uinput.isReady || uinput.setupNeeded) break
                 delay(150)
             }
             if (uinput.isReady) {
@@ -469,20 +468,13 @@ class ControllerService : Service() {
                 Log.i(TAG, "Using uinput virtual gamepad (${Prefs.getProfile(this@ControllerService).displayName})")
                 return
             }
-            Log.w(TAG, "uinput service did not become ready, falling back to inject")
+            Log.w(TAG, "uinput helper did not become ready")
             uinput.unbind()
         } catch (t: Throwable) {
-            Log.w(TAG, "uinput bind failed: ${t.message}, falling back to inject")
+            Log.w(TAG, "uinput bind failed: ${t.message}")
         }
-
-        // 2. Fallback: legacy injectInputEvent via Shizuku reflection
-        if (legacyInjector.init()) {
-            setMode(InjectionMode.SHIZUKU_INJECT)
-            Log.i(TAG, "Using legacy Shizuku injectInputEvent (games may filter this)")
-        } else {
-            setMode(InjectionMode.NONE)
-            Log.e(TAG, "No injection method available")
-        }
+        setMode(InjectionMode.NONE)
+        Log.e(TAG, "No injection method available")
     }
 
     private fun setMode(newMode: InjectionMode) {
@@ -582,20 +574,6 @@ class ControllerService : Service() {
                 }
                 uinput.pushFrame(frameToSend)
             }
-            InjectionMode.SHIZUKU_INJECT -> {
-                // Axes every frame for smoothness, with live-reloaded calibration
-                legacyInjector.injectMotion(GamepadMapper.axes(
-                    state,
-                    Prefs.getLeftCalibration(this),
-                    Prefs.getRightCalibration(this)
-                ))
-                // Buttons only on debounced change
-                if (buttonsConfirmedThisFrame) {
-                    GamepadMapper.buttons(state, confirmedState!!).forEach { (keyCode, down) ->
-                        legacyInjector.injectKey(keyCode, down)
-                    }
-                }
-            }
             InjectionMode.NONE -> { /* unreachable */ }
         }
     }
@@ -645,7 +623,6 @@ class ControllerService : Service() {
 
         val modeText = when (mode) {
             InjectionMode.UINPUT         -> getString(R.string.notif_mode_uinput, profile.displayName)
-            InjectionMode.SHIZUKU_INJECT -> getString(R.string.notif_mode_inject)
             InjectionMode.NONE           -> getString(R.string.notif_starting)
         }
         val title = getString(R.string.notification_title)
@@ -698,7 +675,6 @@ class ControllerService : Service() {
 
         val icon = when (mode) {
             InjectionMode.UINPUT         -> android.R.drawable.ic_media_play
-            InjectionMode.SHIZUKU_INJECT -> android.R.drawable.ic_media_play
             InjectionMode.NONE           -> android.R.drawable.stat_notify_sync
         }
 

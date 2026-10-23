@@ -2,7 +2,7 @@
 
 Use the **Steam Controller 2026** (Valve, codename *Ibex*) as a standard Android gamepad — no root required. Connect via USB OTG / wireless Puck, or directly via Bluetooth.
 
-The app reads the controller's proprietary HID protocol and exposes it to Android as a virtual gamepad through Linux `uinput` (accessed via Shizuku), so any game that supports controllers sees a real input device — Xbox 360, Xbox One, DualShock 4 or DualSense, your choice. A **Desktop mode** turns the same controller into a virtual mouse + keyboard, ideal for Android TV boxes.
+The app reads the controller's proprietary HID protocol and exposes it to Android as a virtual gamepad through Linux `uinput` (accessed through a shell-UID helper the app starts itself over wireless ADB, no Shizuku needed), so any game that supports controllers sees a real input device — Xbox 360, Xbox One, DualShock 4 or DualSense, your choice. A **Desktop mode** turns the same controller into a virtual mouse + keyboard, ideal for Android TV boxes.
 
 ## Features
 
@@ -16,7 +16,7 @@ The app reads the controller's proprietary HID protocol and exposes it to Androi
 ### Emulation
 - **Five virtual profiles**: Xbox 360 (default), Xbox One, Sony DualShock 4, Sony DualSense, and **Desktop** (mouse + keyboard)
 - **Cycle gamepad profiles directly from the notification** (`↻ → next profile`) without opening the app
-- **Real `InputDevice`** via Linux `uinput` (UID shell via Shizuku UserService) — recognised by games as a real gamepad, not filtered like injected events
+- **Real `InputDevice`** via Linux `uinput` (UID shell helper started by the app over its own ADB connection) — recognised by games as a real gamepad, not filtered like injected events
 - **Automatic fallback** to `IInputManager.injectInputEvent` if `/dev/uinput` is denied (less compatible, kept as safety net)
 
 ### Desktop mode
@@ -56,15 +56,15 @@ The app reads the controller's proprietary HID protocol and exposes it to Androi
 ## Requirements
 
 - Android 8.0+ (API 26) — phone, tablet, or Android TV
-- [Shizuku](https://shizuku.rikka.app/) installed and running
+- Wireless debugging (Android 11+, needs Wi-Fi) — or, on Android 10 and older, a one-time `adb tcpip 5555` from a PC
 - For USB: USB Host (OTG) support on the phone/tablet
 - For Bluetooth: standard BLE (available on every modern Android)
 - A **Steam Controller 2026** (Valve Ibex). The older Steam Controller is not yet supported.
 
 ## Setup
 
-1. Install [Shizuku](https://shizuku.rikka.app/) and start it (ADB Wireless on Android 11+, or one-time ADB cable for older versions).
-2. Install this app and grant it the Shizuku permission when prompted.
+1. Install this app and tap **Start**. On first run it opens **ADB setup**: turn on Developer options → Wireless debugging, tap "Pair device with pairing code", and type the port and code into the app (split-screen keeps the pairing screen open). Android 10 and older: run `adb tcpip 5555` once from a PC, then tap Connect.
+2. From then on the app connects to the local adbd by itself and starts its own helper — no Shizuku.
 3. Grant the **POST_NOTIFICATIONS** permission when asked (Android 13+) so the foreground status notification shows up.
 4. **For USB**: plug the Puck (or the controller directly) into the OTG port. Android will ask for USB permission.
 5. **For Bluetooth**: pair the controller via Android Settings → Bluetooth first, then select it in the **Bluetooth device** list on the Home tab. Use the `↻` refresh button if you just paired it.
@@ -94,7 +94,7 @@ ControllerService
    • foreground-app polling → Game Profile auto-switch
          │
          ▼
-UInputGamepad → AIDL/Binder → UInputService (UID shell via Shizuku)
+UInputGamepad → localhost socket → ShellServer (UID shell, launched via app's own ADB)
                                        │
                                        ▼
                                 JNI uinput_jni.cpp
@@ -114,7 +114,7 @@ UInputGamepad → AIDL/Binder → UInputService (UID shell via Shizuku)
                        X-Box 360 pad" (or DS4, mouse, etc.)
 ```
 
-The HID protocol is parsed natively and translated into the chosen profile's button/axis layout before being written to a virtual gamepad created via Linux `uinput`. The Shizuku `UserService` runs as the `shell` user (UID 2000) which has access to `/dev/uinput` on most Android builds.
+The HID protocol is parsed natively and translated into the chosen profile's button/axis layout before being written to a virtual gamepad created via Linux `uinput`. The helper (`ShellServer`, started with `app_process` through the app's own wireless-ADB connection) runs as the `shell` user (UID 2000) which has access to `/dev/uinput` on most Android builds.
 
 For BLE, the standard HID service (`0x1812`) is claimed by the OS, so the app uses Valve's vendor service (`100f6c32-1735-4313-b402-38567131e5f3`) directly. Connection priority is bumped to `HIGH` after connect to bring the BLE interval from ~50 ms down to ~11 ms.
 
@@ -160,7 +160,7 @@ You can tweak everything live — most changes apply within ~250 ms (next mappin
 - **Trackpads**: usable as a mouse (Desktop mode, or as an optional sidecar cursor alongside a gamepad profile). Not yet exposed as a DualShock 4/DualSense touchpad to games that support one natively.
 - **Gyroscope** (raw accelerometer + gyro) is parsed and shown in the debug view but not yet routed anywhere. Gyro aiming is planned for a future release, fits best with the DualShock 4 / DualSense profiles.
 - **Auto-start over USB** doesn't work on some Samsung devices: Android doesn't open the app when the controller is plugged in. Bluetooth auto-start is not affected. With the Puck, Android only sees the dongle, so turning the controller on with the Puck already plugged in can't start the app either.
-- **Shizuku at reboot**: the user must restart Shizuku after each reboot of the device (an Android limitation, not the app's). With auto-start on, a notification says so instead of failing silently.
+- **Wireless debugging at reboot / Wi-Fi loss**: Android switches Wireless debugging off after a reboot or when Wi-Fi drops (an Android limitation). Turn it back on; pairing is kept. With auto-start on, a notification says so instead of failing silently.
 
 ## Roadmap
 
@@ -178,7 +178,7 @@ The HID protocol reverse engineering credit goes to:
 
 Other key dependencies:
 
-- [Shizuku](https://github.com/RikkaApps/Shizuku) by RikkaApps — the `uinput` access path without root
+- [libadb-android](https://github.com/MuntashirAkon/libadb-android) by Muntashir Al-Islam — the in-app ADB client
 - [Android USB Host API](https://developer.android.com/guide/topics/connectivity/usb/host) and the BLE GATT stack
 - [Jetpack Compose](https://developer.android.com/jetpack/compose) and Material 3 for the UI
 

@@ -16,6 +16,10 @@
 
     <!-- Update checker: fetch latest GitHub release + download/install the signed APK. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Wireless-debugging discovery (mDNS) for the app's own ADB connection. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Auto-launch: lets Settings ask to lift battery optimisation, which is what
          allows starting the foreground service from the background on Android 12+. -->
@@ -89,14 +93,6 @@
                 <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />
             </intent-filter>
         </receiver>
-
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:exported="true"
-            android:multiprocess="false"
-            android:enabled="true"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

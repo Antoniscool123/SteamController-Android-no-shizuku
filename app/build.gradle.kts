@@ -50,7 +50,6 @@ android {
 
     buildFeatures {
         compose = true
-        aidl = true
         buildConfig = true
     }
 
@@ -75,8 +74,8 @@ android {
             // Install alongside a release build instead of replacing it: the two have
             // different signatures and the release may carry a higher versionCode, so a
             // plain debug install fails and uninstalling would take the user's
-            // calibration and mappings with it. Shizuku permission is per-package, so
-            // the debug build asks for its own.
+            // calibration and mappings with it. ADB pairing is per-package, so
+            // the debug build pairs on its own.
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
         }
@@ -90,6 +89,12 @@ android {
                 signingConfig = cfg
             }
         }
+    }
+
+    packaging {
+        // The shell-UID helper loads libuinput_jni.so by file path, so it must be extracted
+        // to the app's native library dir instead of being mapped straight out of the APK.
+        jniLibs { useLegacyPackaging = true }
     }
 
     compileOptions {
@@ -106,8 +111,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
-    implementation(libs.shizuku.api)
-    implementation(libs.shizuku.provider)
+    implementation(libs.libadb)
+    implementation(libs.conscrypt)
+    implementation(libs.bouncycastle.pkix)
     implementation(libs.kotlinx.coroutines.android)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)

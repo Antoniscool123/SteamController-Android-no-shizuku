@@ -29,7 +29,8 @@ import com.steamcontroller.android.uinput.GamepadProfile
 @Composable
 fun HomeScreen(
     serviceRunning: Boolean,
-    shizukuReady: Boolean,
+    adbReady: Boolean,
+    onSetupAdb: () -> Unit,
     transport: Transport,
     onTransport: (Transport) -> Unit,
     profile: GamepadProfile,
@@ -55,7 +56,7 @@ fun HomeScreen(
             }
         }
     }
-    val status: @Composable () -> Unit = { StatusCard(shizukuReady) }
+    val status: @Composable () -> Unit = { StatusCard(adbReady, onSetupAdb) }
     val start: @Composable () -> Unit = {
         ActionButton(
             text = stringResource(if (serviceRunning) R.string.btn_stop else R.string.btn_start),
@@ -102,7 +103,7 @@ fun HomeScreen(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatusCard(shizukuReady: Boolean) {
+private fun StatusCard(adbReady: Boolean, onSetupAdb: () -> Unit) {
     // stateFlow only carries a value once a HID frame has actually been parsed, which is a
     // far more honest "connected" than "the user pressed Start".
     val connected = ControllerService.stateFlow.collectAsState().value != null
@@ -112,7 +113,6 @@ private fun StatusCard(shizukuReady: Boolean) {
     val context = LocalContext.current
     val modeLabel = when (mode) {
         ControllerService.InjectionMode.UINPUT -> "${Prefs.getProfile(context).displayName} (uinput)"
-        ControllerService.InjectionMode.SHIZUKU_INJECT -> "Shizuku inject (limited)"
         ControllerService.InjectionMode.NONE -> null
     }
 
@@ -131,21 +131,24 @@ private fun StatusCard(shizukuReady: Boolean) {
         )
         Spacer(Modifier.height(12.dp))
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (shizukuReady) {
+            if (adbReady) {
                 Pill(
-                    "Shizuku ready",
+                    "ADB access ready",
                     containerColor = colorResource(R.color.status_connected_container),
                     contentColor = colorResource(R.color.status_connected_on_container),
                 )
             } else {
                 Pill(
-                    "Shizuku not ready",
+                    "ADB setup needed",
                     containerColor = colorResource(R.color.status_idle_container),
                     contentColor = colorResource(R.color.status_idle_on_container),
                 )
             }
             battery?.let { Pill("Battery: ${it.describe()}") }
             modeLabel?.let { Pill(it) }
+        }
+        if (!adbReady) {
+            TextButton(onClick = onSetupAdb) { Text(stringResource(R.string.adb_setup_open)) }
         }
     }
 }

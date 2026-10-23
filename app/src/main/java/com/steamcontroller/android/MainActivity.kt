@@ -35,7 +35,6 @@ import com.steamcontroller.android.update.UpdateChecker
 import com.steamcontroller.android.update.UpdateInstaller
 import com.steamcontroller.android.usb.UsbConnectionManager
 import kotlinx.coroutines.launch
-import rikka.shizuku.Shizuku
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -51,7 +50,8 @@ class MainActivity : ComponentActivity() {
     // UI state read by the Compose tree. Kept on the activity because the permission,
     // USB and service callbacks below are what change it.
     private var serviceRunning by mutableStateOf(false)
-    private var shizukuReady by mutableStateOf(false)
+    private var adbReady by mutableStateOf(false)
+    private var showAdbSetup by mutableStateOf(false)
     private var transport by mutableStateOf(Transport.USB)
     private var profile by mutableStateOf(GamepadProfile.XBOX_360)
     private var pairedBtDevices by mutableStateOf<List<BluetoothDevice>>(emptyList())
@@ -107,19 +107,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val shizukuRequestCode = 1001
-
-    private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { _, grantResult ->
-        if (grantResult == PackageManager.PERMISSION_GRANTED) {
-            log("Shizuku permission granted")
-            shizukuReady = true
-            checkAndRequestUsb()
-        } else {
-            log("Shizuku permission denied")
-            Toast.makeText(this, getString(R.string.shizuku_permission_denied), Toast.LENGTH_LONG).show()
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -128,8 +115,6 @@ class MainActivity : ComponentActivity() {
         transport = Prefs.getTransport(this)
         profile = Prefs.getProfile(this)
         btAddress = Prefs.getBluetoothAddress(this)
-
-        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener)
 
         val filter = IntentFilter().apply {
             addAction(usbPermissionAction)
@@ -199,6 +184,17 @@ class MainActivity : ComponentActivity() {
         }
 
         SteamTheme(themeMode) {
+            if (showAdbSetup) {
+                AdbSetupDialog(
+                    onDismiss = { showAdbSetup = false },
+                    onPaired = {
+                        showAdbSetup = false
+                        adbReady = true
+                        log("ADB access ready")
+                        checkPermissionsAndStart()
+                    },
+                )
+            }
             val tabs = listOf(
                 Tab("Home", painterResource(R.drawable.ic_gamepad), tab == AppTab.HOME) { tab = AppTab.HOME },
                 Tab("Profiles", painterResource(R.drawable.ic_game_profiles), tab == AppTab.PROFILES) { tab = AppTab.PROFILES },
@@ -227,7 +223,8 @@ class MainActivity : ComponentActivity() {
                     null -> saved.SaveableStateProvider(tab) { when (tab) {
                         AppTab.HOME -> HomeScreen(
                             serviceRunning = serviceRunning,
-                            shizukuReady = shizukuReady,
+                            adbReady = adbReady,
+                            onSetupAdb = { showAdbSetup = true },
                             transport = transport,
                             onTransport = ::onTransportPicked,
                             profile = profile,
@@ -295,8 +292,7 @@ class MainActivity : ComponentActivity() {
             Prefs.getTransport(this) == Transport.USB &&
             device.vendorId == UsbConnectionManager.STEAM_VID &&
             (getSystemService(USB_SERVICE) as UsbManager).hasPermission(device) &&
-            Shizuku.pingBinder() &&
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+            Prefs.getAdbReady(this)
 
     /** Re-read everything a loaded game profile may have overwritten. */
     private fun syncFromPrefs() {
@@ -385,21 +381,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkPermissionsAndStart() {
-        when {
-            !Shizuku.pingBinder() -> {
-                log("Shizuku not running")
-                Toast.makeText(this, getString(R.string.shizuku_not_running), Toast.LENGTH_LONG).show()
-            }
-            Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED -> {
-                Shizuku.requestPermission(shizukuRequestCode)
-            }
-            else -> {
-                shizukuReady = true
-                when (Prefs.getTransport(this)) {
-                    Transport.USB       -> checkAndRequestUsb()
-                    Transport.BLUETOOTH -> startBluetoothService()
-                }
-            }
+        if (!Prefs.getAdbReady(this)) {
+            log("ADB access not set up yet")
+            showAdbSetup = true
+            return
+        }
+        adbReady = true
+        when (Prefs.getTransport(this)) {
+            Transport.USB       -> checkAndRequestUsb()
+            Transport.BLUETOOTH -> startBluetoothService()
         }
     }
 
@@ -468,8 +458,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        shizukuReady = Shizuku.pingBinder() &&
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        adbReady = Prefs.getAdbReady(this)
         // Profile may have changed from the notification while paused.
         profile = Prefs.getProfile(this)
         maybeAutoCheckForUpdates()
@@ -522,7 +511,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener)
         unregisterReceiver(usbReceiver)
         unregisterReceiver(downloadReceiver)
         super.onDestroy()
