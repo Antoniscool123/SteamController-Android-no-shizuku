@@ -4,8 +4,18 @@
     <string name="status_disconnected">Controller disconnected</string>
     <string name="status_connected">Controller connected</string>
     <string name="status_running">Controller active</string>
-    <string name="shizuku_not_running">Shizuku is not running. Please start Shizuku first.</string>
-    <string name="shizuku_permission_denied">Shizuku permission denied.</string>
+    <string name="adb_not_ready">Wireless debugging is off or not set up. Turn it on (and set it up in the app), then start again.</string>
+    <string name="adb_setup_open">Set up ADB access</string>
+    <string name="adb_setup_title">Set up ADB access</string>
+    <string name="adb_setup_steps">One-time setup, no computer needed:\n1. Connect to Wi-Fi and turn on Developer options → Wireless debugging.\n2. Tap “Pair device with pairing code”.\n3. Type the port and 6-digit code it shows below. Use split-screen or a floating window so the pairing screen stays open.</string>
+    <string name="adb_setup_legacy">Android 10 and older: from a computer run “adb tcpip 5555” once, then tap Connect and allow the connection prompt.</string>
+    <string name="adb_setup_port">Pairing port</string>
+    <string name="adb_setup_code">Pairing code</string>
+    <string name="adb_setup_pair">Pair</string>
+    <string name="adb_setup_connect">Connect</string>
+    <string name="adb_setup_open_dev">Developer options</string>
+    <string name="adb_setup_working">Working…</string>
+    <string name="adb_setup_failed">Failed: %1$s</string>
     <string name="btn_start">Start Service</string>
     <string name="theme_dynamic_unavailable">Dynamic colour needs Android 12 or newer.</string>
     <string name="btn_stop">Stop Service</string>
@@ -16,17 +26,15 @@
     <string name="notification_title">Steam Controller</string>
     <string name="notification_text">Starting…</string>
     <string name="notif_mode_uinput">Emulating %1$s</string>
-    <string name="notif_mode_inject">Fallback: Shizuku inject (limited)</string>
     <string name="notif_mode_none">No injection method available</string>
     <string name="notif_starting">Connecting…</string>
 
     <!-- ━━━━━━━━━━━━ MainActivity ━━━━━━━━━━━━ -->
     <string name="main_title">Steam Controller</string>
-    <string name="main_subtitle">for Android via Shizuku</string>
-    <string name="main_subtitle_tv">for Android TV via Shizuku</string>
+    <string name="main_subtitle">for Android</string>
+    <string name="main_subtitle_tv">for Android TV</string>
     <string name="main_open_github_desc">Open GitHub repository</string>
     <string name="main_help_desc">Help: switching connection modes</string>
-    <string name="main_shizuku_checking">Shizuku: checking…</string>
     <string name="main_transport_usb">USB / Puck</string>
     <string name="main_transport_bt">Bluetooth</string>
     <string name="main_controller_disconnected">Controller: disconnected</string>
@@ -166,7 +174,7 @@
     <string name="settings_theme_desc">Steam uses the blue from the controller itself. Dynamic follows your wallpaper.</string>
     <string name="settings_connection_header">CONNECTION</string>
     <string name="settings_auto_launch">Start automatically when the controller connects</string>
-    <string name="settings_auto_launch_desc">Uses the last transport and emulated controller. Start the service manually once first so USB, Bluetooth and Shizuku permissions are granted. Shizuku must be running: after a phone reboot, restart it.</string>
+    <string name="settings_auto_launch_desc">Uses the last transport and emulated controller. Start the service manually once first so USB, Bluetooth and ADB access are set up. Wireless debugging must be on: after a phone reboot, switch it on again.</string>
     <!-- Update checker -->
     <string name="main_check_update_desc">Check for updates</string>
     <string name="update_dialog_title">Update available</string>

@@ -60,9 +60,19 @@ object Prefs {
     private const val KEY_LAST_UPDATE_CHECK = "last_update_check_at"
     private const val KEY_SKIPPED_UPDATE_VERSION = "skipped_update_version"
     private const val KEY_SAVED_SHOW_IME_HARD_KB = "saved_show_ime_with_hard_keyboard"
+    private const val KEY_ADB_READY = "adb_ready"
 
     private fun prefs(context: Context) =
         context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
+
+    // ─── ADB access (replaces Shizuku) ───────────────────────────────────────
+    /** True once this app has paired with / connected to the local adbd at least once. */
+    fun getAdbReady(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ADB_READY, false)
+
+    fun setAdbReady(context: Context, ready: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ADB_READY, ready).apply()
+    }
 
     // ─── Update checker ──────────────────────────────────────────────────────
     fun getLastUpdateCheckAt(context: Context): Long =

@@ -1,2 +1,5 @@
--keep class rikka.shizuku.** { *; }
 -keep class com.steamcontroller.android.** { *; }
+-keep class org.conscrypt.** { *; }
+-keep class io.github.muntashirakon.adb.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn org.conscrypt.**

@@ -12,7 +12,7 @@ import java.util.Locale
 
 /**
  * Non-gamepad actions triggered by mapped Steam Controller buttons.
- * The actual shell command runs in the Shizuku UserService (UID shell, ~2000),
+ * The actual shell command runs in the app's shell-UID helper process (UID shell, ~2000),
  * passed in as a `runShell` callback so this object stays decoupled from the IPC layer.
  */
 object SystemActions {
@@ -24,7 +24,7 @@ object SystemActions {
      * notifies MediaScanner so it appears in the gallery, and toasts the user.
      * Runs the shell command on a background thread so the input pipeline isn't blocked.
      *
-     * @param runShell function that executes a shell command via the Shizuku user service
+     * @param runShell function that executes a shell command via the shell helper
      *                 and returns the exit code (or -1 on failure).
      */
     fun takeScreenshot(context: Context, runShell: (Array<String>) -> Int) {

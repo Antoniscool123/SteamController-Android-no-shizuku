@@ -1,12 +1,9 @@
 package com.steamcontroller.android.uinput
 
-import com.steamcontroller.android.ipc.IUInputService
-
-import android.content.ComponentName
 import android.content.Context
-import android.content.ServiceConnection
-import android.os.IBinder
 import android.util.Log
+import com.steamcontroller.android.adb.ShellLauncher
+import com.steamcontroller.android.shell.UInputClient
 import com.steamcontroller.android.Prefs
 import com.steamcontroller.android.input.DEFAULT_MOUSE_MAPPING
 import com.steamcontroller.android.input.MOUSE_LEFT_PAD_CLICK_BIT
@@ -19,10 +16,9 @@ import com.steamcontroller.android.input.XboxTarget
 import com.steamcontroller.android.parser.Buttons
 import com.steamcontroller.android.parser.SteamControllerState
 import kotlin.math.abs
-import rikka.shizuku.Shizuku
 
 // High-level Kotlin API for the virtual Xbox 360 gamepad.
-// Binds UInputService through Shizuku and translates SC2026 state into Xbox events.
+// Starts the shell-UID helper through the app's own ADB connection and translates SC2026 state into Xbox events.
 class UInputGamepad(private val context: Context, initialProfile: GamepadProfile) {
 
     private val TAG = "UInputGamepad"
@@ -33,7 +29,7 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
         // writing the literal string "null".
         private const val SHOW_IME_UNSET_SENTINEL = "__unset__"
     }
-    private var service: IUInputService? = null
+    private var service: UInputClient? = null
     private var bound = false
     @Volatile private var profile: GamepadProfile = initialProfile
 
@@ -74,61 +70,57 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
     // Trigger / pad scroll: accumulator so we can convert continuous 0..32767 deltas into discrete wheel ticks
     private var scrollAccumulator: Int = 0
 
-    private val args = Shizuku.UserServiceArgs(
-        ComponentName(context.packageName, UInputService::class.java.name)
-    )
-        .daemon(false)
-        .processNameSuffix("uinput")
-        .debuggable(false)
-        // Bumped with every IUInputService change: Shizuku reuses a running service of the
-        // same version, and an old one would not know the newer methods.
-        .version(2)
-
     @Volatile private var deviceReady = false
 
-    private val connection = object : ServiceConnection {
-        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            val svc = IUInputService.Stub.asInterface(binder)
-            service = svc
-            Log.i(TAG, "UInputService connected")
-            // Binder calls can block — do them off the main thread
-            Thread {
-                try {
-                    if (svc.canCreateDevice()) {
-                        val ok = svc.createGamepad(profile.id)
-                        deviceReady = ok
-                        Log.i(TAG, "createGamepad(${profile.displayName}) → $ok")
-                        if (ok) applyShowImeOverride(svc)
-                    } else {
-                        Log.e(TAG, "Cannot open /dev/uinput from shell UID — SELinux likely blocks it on this device")
-                    }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "init failed: ${t.message}")
-                }
-            }.start()
-        }
-        override fun onServiceDisconnected(name: ComponentName?) {
-            service = null
-            deviceReady = false
-            Log.w(TAG, "UInputService disconnected")
-        }
-    }
+    /** Set when the helper could not be started because ADB access is missing. */
+    @Volatile var setupNeeded = false
+        private set
 
     fun bind() {
         if (bound) return
-        Shizuku.bindUserService(args, connection)
         bound = true
+        setupNeeded = false
         startRumbleThread()
+        // Launching goes through ADB and can take seconds: never on the caller's thread.
+        Thread({ startHelper() }, "uinput-start").start()
+    }
+
+    private fun startHelper() {
+        try {
+            val launch = ShellLauncher.start(context)
+            val client = UInputClient(launch.port, launch.token)
+            if (!client.connect(10_000)) {
+                Log.e(TAG, "Helper did not come up on port ${launch.port}")
+                return
+            }
+            if (!bound) { client.destroy(); return }  // unbind() won the race
+            service = client
+            Log.i(TAG, "Helper connected")
+            if (client.canCreateDevice()) {
+                val ok = client.createGamepad(profile.id)
+                deviceReady = ok
+                Log.i(TAG, "createGamepad(${profile.displayName}) → $ok")
+                if (ok) applyShowImeOverride(client)
+            } else {
+                Log.e(TAG, "Cannot open /dev/uinput from shell UID — SELinux likely blocks it on this device")
+            }
+        } catch (e: ShellLauncher.SetupNeeded) {
+            setupNeeded = true
+            Log.w(TAG, "ADB access not set up: ${e.message}")
+        } catch (t: Throwable) {
+            Log.e(TAG, "helper start failed: ${t.message}")
+        }
     }
 
     fun unbind() {
         if (!bound) return
-        stopRumbleThread()
-        try { service?.let { restoreShowImeOverride(it) } } catch (_: Throwable) {}
-        try { service?.destroy() } catch (_: Throwable) {}
-        Shizuku.unbindUserService(args, connection, true)
         bound = false
+        stopRumbleThread()
+        val client = service
+        try { client?.let { restoreShowImeOverride(it) } } catch (_: Throwable) {}
+        try { client?.destroy() } catch (_: Throwable) {}
         service = null
+        deviceReady = false
     }
 
     // Android's InputManager treats a connected HID keyboard-classified device as a
@@ -138,7 +130,7 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
     // Forcing Settings.Secure.show_ime_with_hard_keyboard=1 via the shell UID makes Android
     // show the soft keyboard regardless. Reverted on unbind() so a real Bluetooth keyboard
     // paired later behaves normally.
-    private fun applyShowImeOverride(svc: IUInputService) {
+    private fun applyShowImeOverride(svc: UInputClient) {
         try {
             if (Prefs.getSavedShowImeHardKeyboard(context) == null) {
                 val current = try {
@@ -154,7 +146,7 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
         }
     }
 
-    private fun restoreShowImeOverride(svc: IUInputService) {
+    private fun restoreShowImeOverride(svc: UInputClient) {
         try {
             val saved = Prefs.getSavedShowImeHardKeyboard(context) ?: return
             if (saved == SHOW_IME_UNSET_SENTINEL) {
@@ -324,7 +316,7 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
      * keeping the mouse fd idle is critical so Android IME focus isn't stolen by
      * a phantom cursor (same rationale as in Desktop mode).
      */
-    private fun pushSidecarFrame(svc: IUInputService, state: SteamControllerState, mappedKeys: Int) {
+    private fun pushSidecarFrame(svc: UInputClient, state: SteamControllerState, mappedKeys: Int) {
         val (relX, relY, scrollTicks) = if (cachedTrackpadAsMouse) {
             val (rx, ry) = computeRightPadDelta(state)
             Triple(rx, ry, computeLeftPadScroll(state))
@@ -399,7 +391,7 @@ class UInputGamepad(private val context: Context, initialProfile: GamepadProfile
      * face/system buttons → mapped keys, DPAD → arrow keys, left pad click → right mouse.
      * Special actions (e.g. SCREENSHOT) still fire via the gamepad mapping.
      */
-    private fun pushMouseFrame(svc: IUInputService, state: SteamControllerState) {
+    private fun pushMouseFrame(svc: UInputClient, state: SteamControllerState) {
         // Right trackpad → cursor delta; left trackpad vertical → scroll wheel.
         // Same helpers as the gamepad sidecar mode so the gesture is identical.
         val (relX, relY)   = computeRightPadDelta(state)

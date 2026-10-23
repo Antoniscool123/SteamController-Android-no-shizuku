@@ -1,11 +1,12 @@
 package com.steamcontroller.android.uinput
 
-// Thin JNI binding. Loaded by the Shizuku user service process (UID shell).
-// Calling these from the app UID will fail with permission denied on /dev/uinput.
+// Thin JNI binding. Only ever used inside the shell-UID helper process (ShellServer), which
+// loads the library by absolute path: app_process has no app library search path.
+// Calling these from the app UID would fail with permission denied on /dev/uinput.
 object UInputNative {
 
-    init {
-        System.loadLibrary("uinput_jni")
+    fun load(absolutePath: String) {
+        System.load(absolutePath)
     }
 
     external fun canOpen(): Boolean
